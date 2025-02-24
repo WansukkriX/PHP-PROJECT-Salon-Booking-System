@@ -10,86 +10,88 @@ if ($conn->connect_error) {
 
 // ตรวจสอบการล็อกอิน
 if (!isset($_SESSION['user_id'])) {
-    // ถ้ายังไม่ได้ล็อกอิน ให้เก็บ URL ปัจจุบันไว้ใน session
     $_SESSION['redirect_url'] = $_SERVER['REQUEST_URI'];
-    // ส่งข้อความแจ้งเตือน
     $_SESSION['error_message'] = "กรุณาล็อกอินก่อนทำการจองคิว";
-    // redirect ไปหน้า login
     header('Location: login.php');
     exit();
 }
 
 // ดึงข้อมูลผู้ใช้จาก session
 $user_id = $_SESSION['user_id'];
-$user_query = "SELECT username FROM users WHERE id = $user_id";
-$user_result = $conn->query($user_query);
+$user_query = "SELECT username FROM users WHERE id = ?";
+$stmt = $conn->prepare($user_query);
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+$user_result = $stmt->get_result();
 $user = $user_result->fetch_assoc();
+$stmt->close();
 
-// ตรวจสอบว่ามีการส่งค่า service_id มาหรือไม่
-if (isset($_GET['service_id'])) {
-    $service_id = $_GET['service_id'];
-
-    // ดึงข้อมูลบริการจากฐานข้อมูล
-    $service_query = "SELECT * FROM services WHERE id = $service_id";
-    $service_result = $conn->query($service_query);
-
-    if ($service_result->num_rows > 0) {
-        $service = $service_result->fetch_assoc();
-    } else {
-        die("ไม่พบบริการที่เลือก");
-    }
-} else {
+// ตรวจสอบ service_id
+if (!isset($_GET['service_id'])) {
     die("ไม่พบบริการที่เลือก");
 }
 
-// ดึงข้อมูลช่างทำผม (stylists) จากฐานข้อมูล
+$service_id = $_GET['service_id'];
+$service_query = "SELECT * FROM services WHERE id = ?";
+$stmt = $conn->prepare($service_query);
+$stmt->bind_param("i", $service_id);
+$stmt->execute();
+$service_result = $stmt->get_result();
+
+if ($service_result->num_rows > 0) {
+    $service = $service_result->fetch_assoc();
+} else {
+    die("ไม่พบบริการที่เลือก");
+}
+$stmt->close();
+
+// ดึงข้อมูลช่างทำผม
 $stylists_query = "SELECT * FROM stylists";
 $stylists_result = $conn->query($stylists_query);
 
-// ตรวจสอบว่ามีการส่งฟอร์มจองคิวหรือไม่
+// ตรวจสอบการส่งฟอร์ม
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    // รับค่าจากฟอร์ม
-    $customer_name = $_POST['customer_name']; // จะถูกกรอกเป็นชื่อผู้ใช้งานจาก session
-    $service_id = $_POST['service_id'];
-    $stylist_id = $_POST['stylist_id'];
-    $booking_date = $_POST['booking_date'];
-    $booking_time = $_POST['booking_time'];
-    $deposit = $_POST['deposit'];
+    $stylist_id = $_POST['stylist_id'] ?? null;
+    $booking_date = $_POST['booking_date'] ?? null;
+    $booking_time = $_POST['booking_time'] ?? null;
+    $deposit = $_POST['deposit'] ?? null;
+    $customer_name = $user['username']; // ดึงจากฐานข้อมูลโดยตรง
 
-    // ตรวจสอบข้อมูล
-    if (empty($customer_name) || empty($stylist_id) || empty($booking_date) || empty($booking_time) || empty($deposit)) {
+    // ตรวจสอบค่าที่จำเป็น
+    if (empty($stylist_id) || empty($booking_date) || empty($booking_time) || empty($deposit)) {
         echo "<p style='color: red;'>กรุณากรอกข้อมูลให้ครบถ้วน</p>";
     } else {
-        // ตรวจสอบว่ามีการอัปโหลดไฟล์หรือไม่
+        // ตรวจสอบไฟล์อัปโหลด
         if (isset($_FILES['transfer_proof']) && $_FILES['transfer_proof']['error'] == 0) {
             $file = $_FILES['transfer_proof'];
-
-            // ตรวจสอบประเภทไฟล์
             $allowed_types = ['image/jpeg', 'image/png', 'image/gif'];
+
             if (in_array($file['type'], $allowed_types)) {
-                // บันทึกไฟล์ลงในเซิร์ฟเวอร์
-                $upload_dir = 'uploads/'; // โฟลเดอร์สำหรับเก็บไฟล์
+                // สร้างโฟลเดอร์ถ้ายังไม่มี
+                $upload_dir = 'uploads/';
                 if (!is_dir($upload_dir)) {
-                    mkdir($upload_dir, 0777, true); // สร้างโฟลเดอร์ถ้ายังไม่มี
+                    mkdir($upload_dir, 0777, true);
                 }
 
-                $file_name = uniqid() . '_' . basename($file['name']); // สร้างชื่อไฟล์ใหม่เพื่อป้องกันการซ้ำ
+                $file_name = uniqid() . '_' . basename($file['name']);
                 $file_path = $upload_dir . $file_name;
 
                 if (move_uploaded_file($file['tmp_name'], $file_path)) {
-                    // เพิ่มข้อมูลการจองลงในตาราง bookings
+                    // เพิ่มข้อมูลการจอง (ใช้ Prepared Statement)
                     $sql = "INSERT INTO bookings (customer_name, service_id, stylist_id, booking_date, booking_time, deposit, transfer_proof) 
-                            VALUES ('$customer_name', '$service_id', '$stylist_id', '$booking_date', '$booking_time', '$deposit', '$file_name')";
+                            VALUES (?, ?, ?, ?, ?, ?, ?)";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param("siissds", $customer_name, $service_id, $stylist_id, $booking_date, $booking_time, $deposit, $file_name);
 
-if ($conn->query($sql) === TRUE) {
-    // แสดง Pop-up แจ้งเตือน และ redirect ไปหน้าหลัก
-    echo "<script>
-        alert('จองคิวสำเร็จ!');
-        window.location.href = 'index.php';
-    </script>";
-} else {
-    echo "<script>alert('เกิดข้อผิดพลาด: " . addslashes($conn->error) . "');</script>";
-}
+                    if ($stmt->execute()) {
+                        // เพิ่มข้อมูลการจองสำเร็จ
+                        $_SESSION['booking_success'] = "จองคิวสำเร็จ!";
+                        header("Location: booking_list.php"); // เปลี่ยนเป็นหน้าแสดงคิว
+                        exit(); // หยุดการทำงานของโค้ดที่เหลือหลังจาก redirect
+                    } else {
+                        echo "<p style='color: red;'>เกิดข้อผิดพลาด: " . $conn->error . "</p>";
+                    }
+                    $stmt->close();
                 } else {
                     echo "<p style='color: red;'>ไม่สามารถอัปโหลดไฟล์ได้</p>";
                 }
@@ -102,7 +104,8 @@ if ($conn->query($sql) === TRUE) {
     }
 }
 
-$is_logged_in = isset($_SESSION['user_id']); // เช็คว่าผู้ใช้ล็อกอินหรือไม่
+
+$is_logged_in = isset($_SESSION['user_id']);
 ?>
 <!DOCTYPE html>
 <html lang="th">

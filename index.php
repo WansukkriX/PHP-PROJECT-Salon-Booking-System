@@ -25,7 +25,7 @@ $is_logged_in = isset($_SESSION['user_id']); // เช็คว่าผู้�
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Beauty Salon - หน้าหลัก</title>
-    <style>
+<style>
         * {
             margin: 0;
             padding: 0;
@@ -209,7 +209,7 @@ $is_logged_in = isset($_SESSION['user_id']); // เช็คว่าผู้�
     <div class="menu-bar">
         <a href="index.php">หน้าแรก</a>
         <a href="services.php">บริการ</a>
-        <!-- <a href="booking.php">จองคิว</a> -->
+        <a href="booking.php">จองคิว</a>
         <?php if ($is_logged_in): ?>
             <!-- ถ้าผู้ใช้ล็อกอินแล้ว -->
             <a href="logout.php">ออกจากระบบ</a>
